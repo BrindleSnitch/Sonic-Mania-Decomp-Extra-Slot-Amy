@@ -6,6 +6,9 @@ on:
       retro_revision:
         description: "3 = v5U/Origins, 2 = v5/Steam"
         default: "3"
+      addendum_ref:
+        description: "Addendum git ref to build (commit/tag/branch)"
+        default: "master"
 
 jobs:
   addendum-mod:
@@ -27,6 +30,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: "KiaraGale/Sonic-Mania-Addendum"
+          ref: ${{ inputs.addendum_ref }}
           path: "Sonic-Mania-Addendum"
 
       - name: Checkout Example-Mods
