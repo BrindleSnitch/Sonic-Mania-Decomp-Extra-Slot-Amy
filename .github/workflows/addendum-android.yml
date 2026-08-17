@@ -116,6 +116,45 @@ jobs:
           # _GLVERSION is a char[128]; the extended string must still fit.
           test "$(grep -o '_GLVERSION3 "[^"]*"' EGLRenderDevice.cpp | wc -c)" -lt 128
 
+      - name: Patch Addendum Options null controls
+        working-directory: ./Sonic-Mania-Addendum/SonicMania/Objects/Menu
+        run: |
+          # The repo's Menu scene (Data/Stages/Menu/Scene1.bin) contains UIControls
+          # tagged "Addendum Options", "Gameplay Options", "Style Options" and
+          # "Music Options" -- but NOT "Multiplayer Options". MainMenu_Initialize
+          # therefore leaves MainMenu->multiplayerOptsControl NULL, and
+          # MainMenu_YPressCB_GoToAddendumOptions calls SetToggleButtons_Multiplayer()
+          # unconditionally *before* transitioning -> NULL deref the instant you press
+          # Y/H on the main menu. Same deref again on the way out via
+          # MainMenu_StartReturnToParentScreen(). This is why "Addendum Options" has
+          # never been reachable, which is where SPINDASH / MOVESET / PEELOUT / LIFE
+          # SYSTEM / SHIELD options live in this build.
+          guard() { # $1=func  $2=ptr  $3=buttons needed
+            sed -i "/^void $1(void)\$/,/^}\$/ s@EntityUIControl \*control         = MainMenu->$2;@&\n    if (!control || control->buttonCount < $3) return;@" AddendumToggles.c
+          }
+          guard AddendumToggles_SetToggleButtons_Gameplay           gameplayOptsControl    14
+          guard AddendumToggles_GetTogglesFromSelection_Gameplay    gameplayOptsControl    14
+          guard AddendumToggles_SetToggleButtons_Style              styleOptsControl        2
+          guard AddendumToggles_GetTogglesFromSelection_Style       styleOptsControl        2
+          guard AddendumToggles_SetToggleButtons_Music              musicOptsControl        2
+          guard AddendumToggles_GetTogglesFromSelection_Music       musicOptsControl        2
+          guard AddendumToggles_SetToggleButtons_Multiplayer        multiplayerOptsControl  1
+          guard AddendumToggles_GetTogglesFromSelection_Multiplayer multiplayerOptsControl  1
+          echo "--- AddendumToggles.c guards ---"
+          grep -n "control->buttonCount <" AddendumToggles.c
+          test "$(grep -c 'control->buttonCount <' AddendumToggles.c)" -eq 8
+          # ChangeMenuSpriteStyle also assigns `control` but never derefs it -- must NOT be guarded
+          test "$(sed -n '/^void AddendumToggles_ChangeMenuSpriteStyle(void)$/,/^}$/p' AddendumToggles.c | grep -c 'buttonCount')" -eq 0
+
+          # Selecting the Multiplayer entry would hand focus to a child that does not
+          # exist; only transition when the target control actually resolved.
+          sed -i 's@^    if (control->buttonID == 3)$@    if (control->buttonID == 3 \&\& MainMenu->multiplayerOptsControl)@' MainMenu.c
+          sed -i 's@^        UIControl_MatchMenuTag("Multiplayer Options");$@&\n    else if (control->buttonID == 3)\n        control->childHasFocus = false;@' MainMenu.c
+          echo "--- MainMenu.c transition guard ---"
+          sed -n '/^void MainMenu_HandleToAddendumSubMenuTransitionCB/,/^}$/p' MainMenu.c
+          test "$(grep -c 'buttonID == 3 && MainMenu->multiplayerOptsControl' MainMenu.c)" -eq 1
+          test "$(grep -c 'control->childHasFocus = false;' MainMenu.c)" -eq 1
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
