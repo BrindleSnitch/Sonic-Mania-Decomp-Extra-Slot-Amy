@@ -88,6 +88,11 @@ jobs:
           echo "--- PauseMenu.c ---"
           grep -n -A2 "textFrames, 10, &button->animator" ../Global/PauseMenu.c
           test "$(grep -c 'button->listID = 10' ../Global/PauseMenu.c)" -eq 1
+          # UIDialog does the same thing with animation 9 ("Dialog Buttons")
+          sed -i 's|RSDK.SetSpriteAnimation(UIWidgets->textFrames, 9, \&button->animator, true, frame);|RSDK.SetSpriteAnimation(UIWidgets->textFrames, 9, \&button->animator, true, frame);\n        button->listID = 9;\n        button->frameID = frame;|' UIDialog.c
+          echo "--- UIDialog.c ---"
+          grep -n -A2 "textFrames, 9, &button->animator" UIDialog.c
+          test "$(grep -c 'button->listID = 9' UIDialog.c)" -eq 1
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
