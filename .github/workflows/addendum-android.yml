@@ -94,6 +94,28 @@ jobs:
           grep -n -A2 "textFrames, 9, &button->animator" UIDialog.c
           test "$(grep -c 'button->listID = 9' UIDialog.c)" -eq 1
 
+      - name: Patch EGL shader uniform collision (GLES3)
+        working-directory: ./RSDKv5/RSDK/Graphics/EGL
+        run: |
+          # On GLES3 ("#version 300 es") `textureSize` is a BUILT-IN FUNCTION, so the
+          # shaders' `uniform vec2 textureSize;` is rejected ("redeclaring name") and
+          # every screen/video shader fails to compile. LoadShader then bails, maxShaders
+          # stays 0, and the engine silently falls back to the hardcoded passthrough
+          # shader with shaderSupport=false -- losing filtered scaling, screen dimming,
+          # and YUV decode (all FMV renders greyscale).
+          # Fix: rename the uniform from the GLES3 preamble, and match the lookup site.
+          sed -i 's|#define texture2D texture\\n"|#define texture2D texture\\n#define textureSize RSDK_texSize\\n"|' EGLRenderDevice.cpp
+          sed -i 's|"textureSize"), 1, \&textureSize\.x|"RSDK_texSize"), 1, \&textureSize.x|' EGLRenderDevice.cpp
+          echo "--- _GLVERSION3 ---"
+          grep -n '_GLVERSION3 "' EGLRenderDevice.cpp
+          echo "--- uniform lookup ---"
+          grep -n 'RSDK_texSize"' EGLRenderDevice.cpp
+          test "$(grep -c 'define textureSize RSDK_texSize' EGLRenderDevice.cpp)" -eq 1
+          test "$(grep -c '"RSDK_texSize")' EGLRenderDevice.cpp)" -eq 1
+          test "$(grep -c '"textureSize")' EGLRenderDevice.cpp)" -eq 0
+          # _GLVERSION is a char[128]; the extended string must still fit.
+          test "$(grep -o '_GLVERSION3 "[^"]*"' EGLRenderDevice.cpp | wc -c)" -lt 128
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
