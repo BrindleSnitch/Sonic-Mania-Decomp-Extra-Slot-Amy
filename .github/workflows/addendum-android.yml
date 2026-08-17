@@ -67,6 +67,15 @@ jobs:
           ln -s "$PWD/RSDKv5-Example-Mods/ManiaTouchControls" ./android/app/jni/MTC
           ln -s "$PWD/RSDKv5-Example-Mods/UltrawideMania" ./android/app/jni/UWM
 
+      - name: Patch menus back to pre-rendered text
+        working-directory: ./Sonic-Mania-Addendum/SonicMania/Objects/Menu
+        run: |
+          sed -i 's/self->string\.length > 0 \&\& !self->disabled/(0)/g' UIButton.c UIButtonPrompt.c
+          sed -i 's/if (self->string\.length > 0)/if (0)/g' UIButton.c UIButtonPrompt.c
+          echo "--- patched branches ---"
+          grep -n "if (0)\|if ((0))" UIButton.c UIButtonPrompt.c
+          test "$(grep -c 'string\.length > 0' UIButton.c UIButtonPrompt.c | awk -F: '{s+=$2} END {print s}')" -le 4
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
