@@ -82,6 +82,12 @@ jobs:
           echo "--- UIButtonPrompt.c ---"
           grep -n "if (0)" UIButtonPrompt.c
           test "$(grep -c 'listID == 0 && self->frameID == 0' UIButton.c)" -ge 4
+          # PauseMenu sets the correct sprite directly but never records listID/frameID,
+          # so UIButton_Setup thinks it has no artwork. Record them.
+          sed -i 's|RSDK.SetSpriteAnimation(UIWidgets->textFrames, 10, \&button->animator, true, id);|RSDK.SetSpriteAnimation(UIWidgets->textFrames, 10, \&button->animator, true, id);\n        button->listID = 10;\n        button->frameID = id;|' ../Global/PauseMenu.c
+          echo "--- PauseMenu.c ---"
+          grep -n -A2 "textFrames, 10, &button->animator" ../Global/PauseMenu.c
+          test "$(grep -c 'button->listID = 10' ../Global/PauseMenu.c)" -eq 1
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
