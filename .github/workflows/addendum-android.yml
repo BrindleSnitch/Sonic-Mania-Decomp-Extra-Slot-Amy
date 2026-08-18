@@ -283,28 +283,6 @@ jobs:
           grep -n -B2 -A2 'RSDK.DrawSprite(&self->animator, &drawPos, false);' UIButton.c
           test "$(grep -c 'drawing sprite' UIButton.c)" -eq 0
 
-      - name: DIAGNOSTIC probes on Addendum Options exit path
-        working-directory: ./Sonic-Mania-Addendum/SonicMania/Objects/Menu
-        run: |
-          # TEMPORARY. Brackets every call in MainMenu_StartReturnToParentScreen so the
-          # last SRTP line in log.txt names the function that crashed. Remove once known.
-          sed -i 's@^    if (MainMenu->inAddendumMenu) {$@    LogHelpers_Print("SRTP enter inAddendumMenu=%d", MainMenu->inAddendumMenu);\n&@' MainMenu.c
-          sed -i 's@^        AddendumToggles_\(.*\)();$@        LogHelpers_Print("SRTP >> \1");\n&@' MainMenu.c
-          sed -i 's@^        MainMenu->inAddendumMenu = false;$@        LogHelpers_Print("SRTP >> done");\n&@' MainMenu.c
-          sed -i 's@^bool32 MainMenu_AddendumSubMenu_ReturnToAddendumMenu(void) { @bool32 MainMenu_AddendumSubMenu_ReturnToAddendumMenu(void) { LogHelpers_Print("SRTP >> subBack"); @' MainMenu.c
-          echo "--- instrumented ---"
-          sed -n '/^void MainMenu_StartReturnToParentScreen/,/^}$/p' MainMenu.c
-          # probes present
-          test "$(grep -c 'SRTP >>' MainMenu.c)" -eq 11
-          test "$(grep -c 'SRTP enter' MainMenu.c)" -eq 1
-          # ...and the ORIGINAL calls must survive. A bare & in the sed replacement is
-          # the whole match; an escaped one is a literal ampersand and silently deletes
-          # the line it was meant to keep.
-          test "$(grep -c '^        AddendumToggles_.*();$' MainMenu.c)" -eq 9
-          test "$(grep -cF '        MainMenu->inAddendumMenu = false;' MainMenu.c)" -eq 1
-          test "$(grep -cF '    if (MainMenu->inAddendumMenu) {' MainMenu.c)" -eq 1
-          test "$(grep -c '^&$' MainMenu.c)" -eq 0
-
       - name: Guard NULL choice ptr in UIButton_SetChoiceSelection
         working-directory: ./Sonic-Mania-Addendum/SonicMania/Objects/Menu
         run: |
@@ -337,21 +315,25 @@ jobs:
           test "$(grep -c 'entityCount < ENTITY_COUNT' Drawing.hpp)" -eq 1
           test "$(grep -c 'entries\[drawGroups\[drawGroup\].entityCount++\] = entityID;' Drawing.hpp)" -eq 1
 
-      - name: DIAGNOSTIC probes on Addendum Options ENTER path
+      - name: Load AddendumOptions.bin at boot
         working-directory: ./Sonic-Mania-Addendum/SonicMania/Objects/Menu
         run: |
-          # TEMPORARY, pairs with the exit-path probes. The exit trail showed only
-          # "SRTP >> subBack" and never "SRTP enter", proving
-          # MainMenu_StartReturnToParentScreen is NOT on the crashing path -- the crash is
-          # on the way INTO a submenu, before UIControl_SetActiveMenu logs its tag.
-          sed -i 's@^void AddendumToggles_MenuButton_ActionCB(void) { @void AddendumToggles_MenuButton_ActionCB(void) { LogHelpers_Print("SRTP >> menuBtnAction"); @' AddendumToggles.c
-          sed -i 's@^    control->childHasFocus   = true;$@&\n    LogHelpers_Print("SRTP >> toMenu buttonID=%d", control->buttonID);@' MainMenu.c
-          echo "--- probes ---"
-          grep -n 'SRTP >>' MainMenu.c AddendumToggles.c
-          test "$(grep -c 'SRTP >> menuBtnAction' AddendumToggles.c)" -eq 1
-          test "$(grep -c 'SRTP >> toMenu' MainMenu.c)" -eq 2
-          test "$(grep -cF 'UITransition_StartTransition(MainMenu_HandleToAddendumSubMenuTransitionCB, 0);' AddendumToggles.c)" -eq 1
-          test "$(grep -c '^    control->childHasFocus   = true;$' MainMenu.c)" -eq 2
+          # Addendum options persist in AddendumOptions.bin (Addendum_SaveOptions writes
+          # it), but ManiaModeMenu_InitAPI only ever loads Options / SaveData /
+          # AddendumData / ReplayDB -- Addendum_LoadOptions is never called, so
+          # addendumOpt->optionsRAM stays zeroed and every option falls back to its
+          # `= 0` enum value on every boot (life system Mania, secondary gems NONE,
+          # shield transfer OFF). Nothing the player sets in Addendum Options survives
+          # a restart.
+          # Addendum_LoadOptionsData() must run first: it sets SaveGame->addendumMods,
+          # which Addendum_LoadOptions early-returns on if NULL. A NULL callback is
+          # handled (`if (callback) callback(...)`).
+          sed -i 's@^                Addendum_LoadFile(Addendum_SaveLoadedCB);$@&\n                Addendum_LoadOptionsData();\n                Addendum_LoadOptions(NULL);@' ManiaModeMenu.c
+          echo "--- InitAPI save loading ---"
+          sed -n '/if (!MenuSetup->initializedSaves) {/,/initializedSaves = true;/p' ManiaModeMenu.c
+          test "$(grep -c 'Addendum_LoadOptionsData();' ManiaModeMenu.c)" -eq 1
+          test "$(grep -c 'Addendum_LoadOptions(NULL);' ManiaModeMenu.c)" -eq 1
+          test "$(grep -c 'Addendum_LoadFile(Addendum_SaveLoadedCB);' ManiaModeMenu.c)" -eq 1
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
