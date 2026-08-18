@@ -228,6 +228,31 @@ jobs:
           test "$(grep -c 'UIControl->anyYPress = false;' UISaveSlot.c)" -eq 1
           test "$(grep -c 'playerID == 1 \&\& !self->p2Active' UISaveSlot.c)" -eq 1
 
+      - name: Patch title screen logo corruption
+        working-directory: ./Sonic-Mania-Addendum/SonicMania/Objects/Title
+        run: |
+          # Addendum's Data/Sprites/Title/PlusLogo.bin ships SIX animations:
+          #   0 Plus Base | 1 Plus Shine | 2 Eggman | 3 Chain | 4 Capsule | 5 Smoke
+          # TitleLogo_State_PlusLogo asks for animation "6 + reverseColor", which is out
+          # of range, so RSDK::SetSpriteAnimation hits its `animationID >= spr->animCount`
+          # guard and returns WITHOUT touching the animator. plusAnimator is therefore
+          # never initialised, yet TitleLogo_State_PlusShine ProcessAnimation()s it and
+          # TitleLogo_Draw draws it every frame -- corrupt blocks and drifting garbage,
+          # beginning exactly when the logo bounce ends and the Plus states take over.
+          # TitleLogo_State_PlusShine already contains the intended form: animation 1,
+          # with reverseColor as the FRAME index. Mirror it.
+          sed -i 's@^        RSDK.SetSpriteAnimation(TitleLogo->plusFrames, 6 + TitleLogo->reverseColor, \&self->plusAnimator, true, 0);$@        RSDK.SetSpriteAnimation(TitleLogo->plusFrames, 1, \&self->plusAnimator, true, TitleLogo->reverseColor);@' TitleLogo.c
+          # Defensive: the PLUS entity never initialises its animators in Create, so a
+          # draw before the first PlusLogo tick reads whatever the entity slot held.
+          sed -i 's@^                    self->storeY = self->position.y;$@&\n                    RSDK.SetSpriteAnimation(TitleLogo->plusFrames, 0, \&self->plusUnderlayAnimator, true, 0);\n                    RSDK.SetSpriteAnimation(TitleLogo->plusFrames, 1, \&self->plusAnimator, true, 0);\n                    self->mainAnimator.frames = NULL;@' TitleLogo.c
+          echo "--- TitleLogo_State_PlusLogo ---"
+          awk '/^void TitleLogo_State_PlusLogo/,/^}$/' TitleLogo.c
+          echo "--- Create, TITLELOGO_PLUS ---"
+          grep -n -A5 'self->storeY = self->position.y;' TitleLogo.c
+          test "$(grep -c '6 + TitleLogo->reverseColor' TitleLogo.c)" -eq 0
+          test "$(grep -c 'plusFrames, 1, &self->plusAnimator, true, TitleLogo->reverseColor' TitleLogo.c)" -eq 2
+          test "$(grep -c 'self->mainAnimator.frames = NULL;' TitleLogo.c)" -eq 1
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
