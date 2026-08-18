@@ -322,6 +322,37 @@ jobs:
           test "$(grep -c '^            newChoice->active = ACTIVE_NORMAL;$' UIButton.c)" -eq 1
           test "$(grep -c '^        newChoice->active         = ACTIVE_NORMAL;$' UIButton.c)" -eq 0
 
+      - name: Bounds-check AddDrawListRef
+        working-directory: ./RSDKv5/RSDK/Graphics
+        run: |
+          # AddDrawListRef validates drawGroup but never entityCount against
+          # ENTITY_COUNT, so it can write past DrawList::entries[ENTITY_COUNT].
+          # GetDrawListRefSlot, directly below it, DOES check. UIControl_MenuChangeButtonInit
+          # calls AddDrawListRef for every in-bounds entity on EVERY menu activation, on top
+          # of the normal per-frame draw pass -- which matches a crash that appears after a
+          # few menu transitions regardless of which screen.
+          sed -i 's@^        drawGroups\[drawGroup\].entries\[drawGroups\[drawGroup\].entityCount++\] = entityID;$@        if (drawGroups[drawGroup].entityCount < ENTITY_COUNT)\n            drawGroups[drawGroup].entries[drawGroups[drawGroup].entityCount++] = entityID;@' Drawing.hpp
+          echo "--- AddDrawListRef ---"
+          sed -n '/inline void AddDrawListRef/,/^}$/p' Drawing.hpp
+          test "$(grep -c 'entityCount < ENTITY_COUNT' Drawing.hpp)" -eq 1
+          test "$(grep -c 'entries\[drawGroups\[drawGroup\].entityCount++\] = entityID;' Drawing.hpp)" -eq 1
+
+      - name: DIAGNOSTIC probes on Addendum Options ENTER path
+        working-directory: ./Sonic-Mania-Addendum/SonicMania/Objects/Menu
+        run: |
+          # TEMPORARY, pairs with the exit-path probes. The exit trail showed only
+          # "SRTP >> subBack" and never "SRTP enter", proving
+          # MainMenu_StartReturnToParentScreen is NOT on the crashing path -- the crash is
+          # on the way INTO a submenu, before UIControl_SetActiveMenu logs its tag.
+          sed -i 's@^void AddendumToggles_MenuButton_ActionCB(void) { @void AddendumToggles_MenuButton_ActionCB(void) { LogHelpers_Print("SRTP >> menuBtnAction"); @' AddendumToggles.c
+          sed -i 's@^    control->childHasFocus   = true;$@&\n    LogHelpers_Print("SRTP >> toMenu buttonID=%d", control->buttonID);@' MainMenu.c
+          echo "--- probes ---"
+          grep -n 'SRTP >>' MainMenu.c AddendumToggles.c
+          test "$(grep -c 'SRTP >> menuBtnAction' AddendumToggles.c)" -eq 1
+          test "$(grep -c 'SRTP >> toMenu' MainMenu.c)" -eq 2
+          test "$(grep -cF 'UITransition_StartTransition(MainMenu_HandleToAddendumSubMenuTransitionCB, 0);' AddendumToggles.c)" -eq 1
+          test "$(grep -c '^    control->childHasFocus   = true;$' MainMenu.c)" -eq 2
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
