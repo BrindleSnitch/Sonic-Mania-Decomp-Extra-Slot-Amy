@@ -205,6 +205,29 @@ jobs:
           grep -n -A13 'anyBackPress |= UIControl->forceBackPress' UIControl.c
           test "$(grep -c 'maxTouchCount' UIControl.c)" -eq 7
 
+      - name: Patch sidekick selection for single-input devices
+        working-directory: ./Sonic-Mania-Addendum/SonicMania/Objects/Menu
+        run: |
+          # UISaveSlot_NextCharacter_ExtraPlayers() already implements per-slot character
+          # choice for players 2-4 and persists it to AddendumData, but it is only reachable
+          # via ControllerInfo[CONT_P2..P4].keyY -- each extra player picking on their OWN
+          # controller. A touch-only device has one input device, so it was unreachable.
+          # A Y that did not come from a physical button (the multi-touch gesture from the
+          # menu-gesture patch, or a tap on the SIDEKICK prompt) cycles player 2.
+          # The press is consumed so one gesture advances exactly one step.
+          sed -i 's@^                UISaveSlot_NextCharacter_ExtraPlayers(3);$@&\n\n            if (UIControl->anyYPress \&\& !ControllerInfo->keyY.press) {\n                UIControl->anyYPress = false;\n                UISaveSlot_NextCharacter_ExtraPlayers(1);\n            }@' UISaveSlot.c
+          # Players 3/4 stay unreachable on a single device, so tie them to the sidekick:
+          # cycling P2 round to "none" (7) clears them too. Inserted before the existing
+          # persist block so its addendumData writes pick up the cleared values.
+          sed -i 's@^    if (saveRAM->saveState != SAVEGAME_BLANK) {$@    if (playerID == 1 \&\& !self->p2Active) {\n        self->buddyFrameID1 = 7;\n        self->buddyFrameID2 = 7;\n        self->p3Active      = false;\n        self->p4Active      = false;\n    }\n\n&@' UISaveSlot.c
+          echo "--- UISaveSlot.c wiring ---"
+          grep -n -A4 'anyYPress \&\& !ControllerInfo->keyY.press' UISaveSlot.c
+          echo "--- UISaveSlot.c cascade ---"
+          grep -n -A6 'playerID == 1 \&\& !self->p2Active' UISaveSlot.c
+          test "$(grep -c 'UIControl->anyYPress \&\& !ControllerInfo->keyY.press' UISaveSlot.c)" -eq 1
+          test "$(grep -c 'UIControl->anyYPress = false;' UISaveSlot.c)" -eq 1
+          test "$(grep -c 'playerID == 1 \&\& !self->p2Active' UISaveSlot.c)" -eq 1
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
