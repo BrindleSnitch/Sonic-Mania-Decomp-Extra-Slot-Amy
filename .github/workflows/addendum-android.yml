@@ -286,21 +286,24 @@ jobs:
       - name: DIAGNOSTIC probes on Addendum Options exit path
         working-directory: ./Sonic-Mania-Addendum/SonicMania/Objects/Menu
         run: |
-          # TEMPORARY. The Addendum Options exit still crashes after the JNI-leak and
-          # debug-spam fixes, and log.txt stops at the menu tag print with no error --
-          # a hard native crash. These probes bracket every call in
-          # MainMenu_StartReturnToParentScreen so the last line written to log.txt
-          # names the function that died. Remove once the culprit is known.
-          # Safe to log here: fires once per menu exit, not per frame, and patch 12
-          # fixed the JNI local-ref leak that made logging fatal.
-          sed -i 's@^    if (MainMenu->inAddendumMenu) {$@    LogHelpers_Print("SRTP enter inAddendumMenu=%d", MainMenu->inAddendumMenu);\n\&@' MainMenu.c
-          sed -i 's@^        AddendumToggles_\(.*\)();$@        LogHelpers_Print("SRTP >> \1");\n\&@' MainMenu.c
-          sed -i 's@^        MainMenu->inAddendumMenu = false;$@        LogHelpers_Print("SRTP >> done");\n\&@' MainMenu.c
+          # TEMPORARY. Brackets every call in MainMenu_StartReturnToParentScreen so the
+          # last SRTP line in log.txt names the function that crashed. Remove once known.
+          sed -i 's@^    if (MainMenu->inAddendumMenu) {$@    LogHelpers_Print("SRTP enter inAddendumMenu=%d", MainMenu->inAddendumMenu);\n&@' MainMenu.c
+          sed -i 's@^        AddendumToggles_\(.*\)();$@        LogHelpers_Print("SRTP >> \1");\n&@' MainMenu.c
+          sed -i 's@^        MainMenu->inAddendumMenu = false;$@        LogHelpers_Print("SRTP >> done");\n&@' MainMenu.c
           sed -i 's@^bool32 MainMenu_AddendumSubMenu_ReturnToAddendumMenu(void) { @bool32 MainMenu_AddendumSubMenu_ReturnToAddendumMenu(void) { LogHelpers_Print("SRTP >> subBack"); @' MainMenu.c
           echo "--- instrumented ---"
           sed -n '/^void MainMenu_StartReturnToParentScreen/,/^}$/p' MainMenu.c
+          # probes present
           test "$(grep -c 'SRTP >>' MainMenu.c)" -eq 11
           test "$(grep -c 'SRTP enter' MainMenu.c)" -eq 1
+          # ...and the ORIGINAL calls must survive. A bare & in the sed replacement is
+          # the whole match; an escaped one is a literal ampersand and silently deletes
+          # the line it was meant to keep.
+          test "$(grep -c '^        AddendumToggles_.*();$' MainMenu.c)" -eq 9
+          test "$(grep -cF '        MainMenu->inAddendumMenu = false;' MainMenu.c)" -eq 1
+          test "$(grep -cF '    if (MainMenu->inAddendumMenu) {' MainMenu.c)" -eq 1
+          test "$(grep -c '^&$' MainMenu.c)" -eq 0
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
