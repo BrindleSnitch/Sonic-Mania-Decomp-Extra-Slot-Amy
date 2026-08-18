@@ -305,6 +305,23 @@ jobs:
           test "$(grep -cF '    if (MainMenu->inAddendumMenu) {' MainMenu.c)" -eq 1
           test "$(grep -c '^&$' MainMenu.c)" -eq 0
 
+      - name: Guard NULL choice ptr in UIButton_SetChoiceSelection
+        working-directory: ./Sonic-Mania-Addendum/SonicMania/Objects/Menu
+        run: |
+          # UIButton_GetChoicePtr returns NULL whenever the entity in the slot before the
+          # button is not a UIChoice/UIVsRoundPicker/UIResPicker/UIWinSize. Its sibling
+          # UIButton_SetChoiceSelectionWithCB checks for that; UIButton_SetChoiceSelection
+          # does not -- it does `newChoice->active = ACTIVE_NORMAL;` unguarded.
+          # AddendumToggles calls the unguarded variant 54 times, including all 14
+          # Gameplay Options buttons from MainMenu_StartReturnToParentScreen, which is
+          # exactly the path that hard-crashes when leaving Addendum Options.
+          sed -i 's@^        newChoice->active         = ACTIVE_NORMAL;$@        if (newChoice)\n            newChoice->active = ACTIVE_NORMAL;@' UIButton.c
+          echo "--- UIButton_SetChoiceSelection tail ---"
+          grep -n -A3 'button->selection         = selection;' UIButton.c
+          test "$(grep -c '^        if (newChoice)$' UIButton.c)" -eq 1
+          test "$(grep -c '^            newChoice->active = ACTIVE_NORMAL;$' UIButton.c)" -eq 1
+          test "$(grep -c '^        newChoice->active         = ACTIVE_NORMAL;$' UIButton.c)" -eq 0
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
