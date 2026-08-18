@@ -253,6 +253,36 @@ jobs:
           test "$(grep -c 'plusFrames, 1, &self->plusAnimator, true, TitleLogo->reverseColor' TitleLogo.c)" -eq 2
           test "$(grep -c 'self->mainAnimator.frames = NULL;' TitleLogo.c)" -eq 1
 
+      - name: Patch JNI local-ref leak in PrintLog
+        working-directory: ./RSDKv5/RSDK/Dev
+        run: |
+          # RSDK::PrintLog on Android does:
+          #   jbyteArray array = jni->env->NewByteArray(len);  // "gets freed automatically"
+          #   ... CallVoidMethod(... writeLog, array, as);
+          # It does NOT get freed automatically. JNI local refs are only reclaimed when a
+          # native call RETURNS to Java; the engine's game loop never does, so every log
+          # line leaks one local ref. Once the local reference table overflows the VM
+          # aborts the process -- a hard crash with audio still running.
+          # Sustained logging therefore kills the game; the Addendum Options screens hit
+          # it fastest because they draw the most buttons.
+          sed -i 's@^            jni->env->CallVoidMethod(jni->thiz, writeLog, array, as);$@&\n            jni->env->DeleteLocalRef(array);@' Debug.cpp
+          echo "--- Debug.cpp ---"
+          grep -n -A2 'CallVoidMethod(jni->thiz, writeLog' Debug.cpp
+          test "$(grep -c 'DeleteLocalRef(array);' Debug.cpp)" -eq 1
+
+      - name: Remove per-frame debug log from UIButton_Draw
+        working-directory: ./Sonic-Mania-Addendum/SonicMania/Objects/Menu
+        run: |
+          # Leftover debug print inside UIButton_Draw, on the pre-rendered branch that
+          # patch 1 routes essentially every button through. It fires once per button per
+          # frame: ~33k lines for the Addendum Options list in a single session, each one
+          # a JNI call. Even with the leak above fixed this is a large amount of I/O per
+          # frame, so remove it at the source.
+          sed -i '/drawing sprite %d from listID/d' UIButton.c
+          echo "--- UIButton_Draw ---"
+          grep -n -B2 -A2 'RSDK.DrawSprite(&self->animator, &drawPos, false);' UIButton.c
+          test "$(grep -c 'drawing sprite' UIButton.c)" -eq 0
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
